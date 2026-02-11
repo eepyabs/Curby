@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(wc -l \"C:\\\\Users\\\\Cmull\\\\StudioProjects\\\\Curby\\\\Curby\"/**/*.{js,jsx,ts,tsx})",
+      "Bash(npm install:*)",
+      "Bash(npx expo run:android:*)",
+      "Bash(wc:*)",
+      "Bash(python3:*)",
+      "Bash(grep:*)",
+      "Bash(findstr:*)",
+      "Bash(powershell:*)",
+      "Bash(dir:*)",
+      "WebFetch(domain:firestore.googleapis.com)",
+      "Bash(del \"C:\\\\Users\\\\Cmull\\\\StudioProjects\\\\Curby\\\\firebaseConfig.js\")"
+    ]
+  }
+}
