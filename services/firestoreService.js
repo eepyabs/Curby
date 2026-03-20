@@ -82,6 +82,21 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 15000) {
   }
 }
 
+export async function deleteDetection(detectionId) {
+    const url = `${BASE}/detection/${detectionId}?key=${API_KEY}`;
+    console.log("Deleting detection: ", detectionId);
+    console.log("DELETE URL: ", url);
+
+    const resp = await fetchWithTimeout(url, { method: "DELETE" });
+
+    if (!resp.ok) {
+        throw new Error(
+            `Firestore REST ${resp.status}: ${await resp.text().catch(() => "")}`
+        );
+    }
+    return true;
+}
+
 /**
  * Fetch all detections from Firestore REST API and return GeoJSON.
  * Retries once on network failure.
@@ -139,6 +154,8 @@ export async function fetchDetectionsAsGeoJSON() {
             confidence: parseField(fields.confidence) ?? 0,
             severity: parseField(fields.severity) ?? 0,
             source: parseField(fields.sourceDeviceId) ?? "unknown",
+            sourceDeviceId: parseField(fields.sourceDeviceId) ?? "unknown",
+            createdBy: parseField(fields.createdBy) ?? parseField(fields.sourceDeviceId) ?? "unknown",
             roadSegmentId: parseField(fields.roadSegmentId) ?? "",
           },
         });
@@ -163,6 +180,7 @@ export async function createDetection({
   longitude,
   roadSegmentId,
   sourceDeviceId,
+  createdBy,
   severity = 3,
   confidence = 1.0,
 }) {
@@ -177,6 +195,7 @@ export async function createDetection({
         stringValue: roadSegmentId || `seg_${latitude.toFixed(3)}_${longitude.toFixed(3)}`,
       },
       sourceDeviceId: { stringValue: sourceDeviceId || "android_app" },
+      createdBy: { stringValue: createdBy || sourceDeviceId || "android_app" },
       severity: { integerValue: String(severity) },
       confidence: { doubleValue: confidence },
       createdAt: { timestampValue: now },
