@@ -1,15 +1,19 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { View, Text, TextInput, StyleSheet, TouchableOpacity, Animated, Easing, ImageBackground } from 'react-native';
+import { View, Text, TextInput, StyleSheet, TouchableOpacity, Animated, Easing, ImageBackground, ActivityIndicator, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { BlurView } from 'expo-blur';
 import { Video } from 'expo-av';
+import { createUser, loginUser } from '../services/firestoreService';
 
 export default function Login({ navigation }) {
     const [isSignup, setIsSignup] = useState(false);
     const [firstName, setFirstName] = useState('');
+    const [email, setEmail] = useState('');
     const [username, setUsername] = useState('');
     const [password, setPassword] = useState('');
     const [confirmPassword, setConfirmPassword] = useState('');
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState('');
 
     const spinValue = useRef(new Animated.Value(0)).current;
 
@@ -29,12 +33,55 @@ export default function Login({ navigation }) {
         outputRange: ['0deg', '360deg'],
     });
 
-    const handleLogin = () => {
-        navigation.replace('Map');
+    const handleLogin = async () => {
+        setError('');
+        if (!username.trim() || !password) {
+            setError('Please fill in all fields');
+            return;
+        }
+        setLoading(true);
+        try {
+            const user = await loginUser(username.trim(), password);
+            console.log('Login success:', user.username);
+            navigation.replace('Map');
+        } catch (e) {
+            console.error('Login error:', e.message);
+            setError(e.message || 'Login failed');
+        } finally {
+            setLoading(false);
+        }
     };
 
-    const handleSignup = () => {
-        navigation.replace('Map');
+    const handleSignup = async () => {
+        setError('');
+        if (!firstName.trim() || !email.trim() || !username.trim() || !password) {
+            setError('Please fill in all fields');
+            return;
+        }
+        if (password !== confirmPassword) {
+            setError('Passwords do not match');
+            return;
+        }
+        setLoading(true);
+        try {
+            const result = await createUser({
+                email: email.trim(),
+                username: username.trim(),
+                password,
+                displayName: firstName.trim(),
+            });
+            console.log('Signup success, user ID:', result.id);
+            Alert.alert('Account Created', 'You can now log in.', [
+                { text: 'OK', onPress: () => setIsSignup(false) },
+            ]);
+            setPassword('');
+            setConfirmPassword('');
+        } catch (e) {
+            console.error('Signup error:', e.message);
+            setError(e.message || 'Signup failed');
+        } finally {
+            setLoading(false);
+        }
     };
 
     return (
@@ -59,6 +106,8 @@ export default function Login({ navigation }) {
                             </View>
                             <Text style={styles.title}>{isSignup ? 'Sign Up' : 'Login'}</Text>
 
+                            {error ? <Text style={styles.errorText}>{error}</Text> : null}
+
                             {isSignup ? (
                                 <>
                                     <TextInput
@@ -66,14 +115,23 @@ export default function Login({ navigation }) {
                                         placeholder="Firstname"
                                         placeholderTextColor="#999"
                                         value={firstName}
-                                        onChangeText={setFirstName}
+                                        onChangeText={(t) => { setFirstName(t); setError(''); }}
+                                    />
+                                    <TextInput
+                                        style={styles.input}
+                                        placeholder="Email"
+                                        placeholderTextColor="#999"
+                                        value={email}
+                                        onChangeText={(t) => { setEmail(t); setError(''); }}
+                                        autoCapitalize="none"
+                                        keyboardType="email-address"
                                     />
                                     <TextInput
                                         style={styles.input}
                                         placeholder="Username"
                                         placeholderTextColor="#999"
                                         value={username}
-                                        onChangeText={setUsername}
+                                        onChangeText={(t) => { setUsername(t); setError(''); }}
                                         autoCapitalize="none"
                                     />
                                     <TextInput
@@ -82,7 +140,7 @@ export default function Login({ navigation }) {
                                         placeholderTextColor="#999"
                                         secureTextEntry
                                         value={password}
-                                        onChangeText={setPassword}
+                                        onChangeText={(t) => { setPassword(t); setError(''); }}
                                     />
                                     <TextInput
                                         style={styles.input}
@@ -90,7 +148,7 @@ export default function Login({ navigation }) {
                                         placeholderTextColor="#999"
                                         secureTextEntry
                                         value={confirmPassword}
-                                        onChangeText={setConfirmPassword}
+                                        onChangeText={(t) => { setConfirmPassword(t); setError(''); }}
                                     />
                                 </>
                             ) : (
@@ -100,7 +158,7 @@ export default function Login({ navigation }) {
                                         placeholder="Username"
                                         placeholderTextColor="#999"
                                         value={username}
-                                        onChangeText={setUsername}
+                                        onChangeText={(t) => { setUsername(t); setError(''); }}
                                         autoCapitalize="none"
                                     />
                                     <TextInput
@@ -109,19 +167,23 @@ export default function Login({ navigation }) {
                                         placeholderTextColor="#999"
                                         secureTextEntry
                                         value={password}
-                                        onChangeText={setPassword}
-
+                                        onChangeText={(t) => { setPassword(t); setError(''); }}
                                     />
                                 </>
                             )}
 
                             <TouchableOpacity
-                                style={styles.button}
+                                style={[styles.button, loading && styles.buttonDisabled]}
                                 onPress={isSignup ? handleSignup : handleLogin}
+                                disabled={loading}
                             >
-                                <Text style={styles.buttonText}>
-                                    {isSignup ? 'Signup' : 'Login'}
-                                </Text>
+                                {loading ? (
+                                    <ActivityIndicator color="#fff" size="small" />
+                                ) : (
+                                    <Text style={styles.buttonText}>
+                                        {isSignup ? 'Signup' : 'Login'}
+                                    </Text>
+                                )}
                             </TouchableOpacity>
 
                             <View style={styles.switchRow}>
@@ -243,5 +305,14 @@ const styles = StyleSheet.create({
         fontSize: 13,
         fontWeight: '700',
         textDecorationLine: 'underline',
+    },
+    errorText: {
+        color: '#ff6b6b',
+        fontSize: 13,
+        textAlign: 'center',
+        marginBottom: 12,
+    },
+    buttonDisabled: {
+        opacity: 0.6,
     },
 });

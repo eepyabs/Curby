@@ -11,7 +11,11 @@
       "Bash(powershell:*)",
       "Bash(dir:*)",
       "WebFetch(domain:firestore.googleapis.com)",
-      "Bash(del \"C:\\\\Users\\\\Cmull\\\\StudioProjects\\\\Curby\\\\firebaseConfig.js\")"
+      "Bash(del \"C:\\\\Users\\\\Cmull\\\\StudioProjects\\\\Curby\\\\firebaseConfig.js\")",
+      "Bash(npx expo install:*)",
+      "Bash(npx expo start:*)",
+      "Bash(npm ls:*)",
+      "Bash(npm uninstall:*)"
     ]
   }
 }
