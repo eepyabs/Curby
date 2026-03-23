@@ -1,7 +1,7 @@
 import Mapbox from "@rnmapbox/maps";
 import * as Location from "expo-location";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, FlatList, Keyboard, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, FlatList, Keyboard, Modal, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { MapIcon, SettingsIcon, StatsIcon } from '../components/NavIcons';
 import ClassFilterPanel from '../components/ClassFilterPanel';
 import DetectionCallout from '../components/DetectionCallout';
@@ -107,29 +107,89 @@ function countDetectionsNearRoute(routeCoords, detectionFeatures, bufferMeters) 
     return count;
 }
 
-async function geocodeAddressSingle(address) {
-    const q = encodeURIComponent(address.trim());
-    const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${q}.json?access_token=${MAPBOX_TOKEN}&limit=1`;
+async function geocodeAddressSingle(query, proximity) {
+    const q = query.trim();
+    if (!q) throw new Error("Enter a destination first.");
+
+    const params = new URLSearchParams({
+        q,
+        access_token: MAPBOX_TOKEN,
+        limit: "8",
+        country: "US",
+        language: "en",
+    });
+
+    if (proximity && Array.isArray(proximity) && proximity.length === 2) {
+        params.set("proximity", `${proximity[0]},${proximity[1]}`);
+    }
+
+    const url = `https://api.mapbox.com/search/searchbox/v1/forward?${params.toString()}`;
     const res = await fetch(url);
-    if (!res.ok) throw new Error(`Geocoding failed (${res.status})`);
+    if (!res.ok) throw new Error(`Search failed (${res.status})`);
+
     const json = await res.json();
     const feature = json?.features?.[0];
-    if (!feature?.center) throw new Error("No results for that address");
-    return feature.center;
+    const center = feature?.geometry?.coordinates;
+
+    if (!center || !Array.isArray(center) || center.length !== 2) {
+        throw new Error("No valid destination found");
+    }
+
+    return center;
 }
 
-async function geocodeAutocomplete(query, proximity) {
-    const q = encodeURIComponent(query.trim());
-    const prox = proximity ? `&proximity=${proximity[0]},${proximity[1]}` : "";
-    const url =
-        `https://api.mapbox.com/geocoding/v5/mapbox.places/${q}.json` +
-        `?access_token=${MAPBOX_TOKEN}` +
-        `&autocomplete=true&limit=6&types=address,place` +
-        prox;
+async function searchBoxSuggest(query, proximity, sessionToken) {
+    const q = query.trim();
+    if (!q) return [];
+
+    const params = new URLSearchParams({
+        q,
+        access_token: MAPBOX_TOKEN,
+        session_token: sessionToken,
+        limit: "8",
+        country: "US",
+        language: "en",
+    });
+
+    if (proximity && Array.isArray(proximity) && proximity.length === 2) {
+        params.set("proximity", `${proximity[0]},${proximity[1]}`);
+    }
+
+    const url = `https://api.mapbox.com/search/searchbox/v1/suggest?${params.toString()}`;
     const res = await fetch(url);
-    if (!res.ok) throw new Error(`Autocomplete failed (${res.status})`);
+    if (!res.ok) throw new Error(`Suggest failed (${res.status})`);
+
     const json = await res.json();
-    return json?.features ?? [];
+    return json?.suggestions ?? [];
+}
+
+async function searchBoxRetrieve(mapboxId, sessionToken) {
+    const params = new URLSearchParams({
+        access_token: MAPBOX_TOKEN,
+        session_token: sessionToken,
+    });
+
+    const url = `https://api.mapbox.com/search/searchbox/v1/retrieve/${encodeURIComponent(mapboxId)}?${params.toString()}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`Retrieve failed (${res.status})`);
+
+    const json = await res.json();
+    const feature = json?.features?.[0];
+    const center = feature?.geometry?.coordinates;
+
+    if (!center || !Array.isArray(center) || center.length !== 2) {
+        throw new Error("No valid destination found");
+    }
+
+    return {
+        feature,
+        center,
+        label:
+            feature?.properties?.full_address ||
+            feature?.properties?.name ||
+            feature?.properties?.place_formatted ||
+            "Selected destination",
+    };
 }
 
 async function fetchDirectionsWithWaypoints(origin, stops = [], destination) {
@@ -175,6 +235,75 @@ function formatArrivalTimeFromNow(durationSeconds) {
     return eta.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 }
 
+function getManeuverSymbol(step) {
+    const type = step?.maneuver?.type ?? "";
+    const modifier = step?.maneuver?.modifier ?? "";
+
+    // U-turn
+    if (type === "turn" && modifier === "uturn") return "↷";
+    if (type === "continue" && modifier === "uturn") return "↷";
+
+    // Leave / Arrive
+    if (type === "leave") return "↑";
+    if (type === "arrive") return "•";
+
+    // Roundabout / Rotary
+    if (type === "roundabout" || type === "rotary") return "⟳";
+    if (type === "roundabout turn" || type === "exit roundabout" || type === "exit rotary") return "⤴";
+
+    // Forks / Merges
+    if (type === "fork") {
+        if (modifier === "left" || modifier === "slight left") return "↰";
+        if (modifier === "right" || modifier === "slight right") return "↱";
+        return "⑂";
+    }
+
+    if (type === "merge") {
+        if (modifier === "left" || modifier === "slight left") return "↖";
+        if (modifier === "right" || modifier === "slight right") return "↗";
+        return "⇉";
+    }
+
+    // Standard turns
+    if (modifier === "left") return "←";
+    if (modifier === "right") return "→";
+    if (modifier === "slight left") return "↖";
+    if (modifier === "slight right") return "↗";
+    if (modifier === "sharp left") return "↰";
+    if (modifier === "sharp right") return "↱";
+    if (modifier === "straight") return "↑";
+
+    // Continue / Default
+    if (type === "continue") return "↑";
+    if (type === "new name") return "↑";
+    if (type === "notification") return "↑";
+    return "↑";
+}
+
+function getSuggestionTitle(item) {
+    return (
+        item?.name ||
+        item?.name_preferred ||
+        item?.feature_name ||
+        item?.place_formatted ||
+        item?.full_address ||
+        "Unknown place"
+    );
+}
+
+function getSuggestionSubtitle(item) {
+    return (
+        item?.place_formatted ||
+        item?.full_address ||
+        item?.address ||
+        ""
+    );
+}
+
+function makeSearchSessionToken() {
+    return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 export default function MapScreen({ navigation }) {
     const { theme } = useTheme();
     const { locationEnabled } = useLocationPref();
@@ -203,6 +332,7 @@ export default function MapScreen({ navigation }) {
     // Autocomplete state
     const [suggestions, setSuggestions] = useState([]);
     const [suggestLoading, setSuggestLoading] = useState(false);
+    const [searchSessionToken, setSearchSessionToken] = useState(makeSearchSessionToken());
 
     // Navigation state
     const [addressQuery, setAddressQuery] = useState("");
@@ -217,6 +347,7 @@ export default function MapScreen({ navigation }) {
     const [pendingStopQuery, setPendingStopQuery] = useState("");
     const [pendingStopLocked, setPendingStopLocked] = useState(false);
     const [finalDestination, setFinalDestination] = useState(null);
+    const [showStopsModal, setShowStopsModal] = useState(false);
 
     // Turn-by-turn state
     const [navActive, setNavActive] = useState(false);
@@ -322,7 +453,7 @@ export default function MapScreen({ navigation }) {
             return;
         }
 
-        if (activeQuery.length < 3) {
+        if (activeQuery.trim().length < 2) {
             setSuggestions([]);
             setSuggestLoading(false);
             return;
@@ -332,7 +463,7 @@ export default function MapScreen({ navigation }) {
 
         const timeoutId = setTimeout(async () => {
             try {
-                const results = await geocodeAutocomplete(activeQuery, userCoords);
+                const results = await searchBoxSuggest(activeQuery, userCoords, searchSessionToken);
                 if (!cancelled) setSuggestions(results);
             } catch (e) {
                 if (!cancelled) setSuggestions([]);
@@ -493,6 +624,7 @@ export default function MapScreen({ navigation }) {
         setAddressLocked(false);
         setPendingStopLocked(false);
         setShowAddStopSearch(false);
+        setShowStopsModal(false);
 
         setNavActive(false);
         setNavSteps([]);
@@ -521,7 +653,7 @@ export default function MapScreen({ navigation }) {
             setSelectedFeature(null);
 
             try {
-                const dest = destOverride ?? finalDestination ?? (await geocodeAddressSingle(typed));
+                const dest = destOverride ?? finalDestination ?? (await geocodeAddressSingle(typed, userCoords));
 
                 const stopsToUse = stopsOverride ?? tripStops;
 
@@ -608,33 +740,42 @@ export default function MapScreen({ navigation }) {
     );
 
     const onPickSuggestion = useCallback(
-        async (feature) => {
+        async (suggestion) => {
             Keyboard.dismiss();
 
-            const name = feature?.place_name ?? "";
-            const center = feature?.center;
+            try {
+                const mapboxId = suggestion?.mapbox_id;
+                if (!mapboxId) return;
 
-            if (!center || !Array.isArray(center) || center.length !== 2) return;
+                const retrieved = await searchBoxRetrieve(mapboxId, searchSessionToken);
+                const center = retrieved.center;
+                const name = retrieved.label;
 
-            if(showAddStopSearch) {
-                const nextStops = [...tripStops, { name, center }];
-                setTripStops(nextStops);
-                setPendingStopQuery("");
-                setPendingStopLocked(false);
-                setShowAddStopSearch(false);
+                if (showAddStopSearch) {
+                    const nextStops = [...tripStops, { name, center }];
+                    setTripStops(nextStops);
+                    setPendingStopQuery("");
+                    setPendingStopLocked(false);
+                    setShowAddStopSearch(false);
+                    setSuggestions([]);
+
+                    setSearchSessionToken(makeSearchSessionToken());
+                    await buildBestRoute(finalDestination, true, nextStops);
+                    return;
+                }
+
+                setAddressLocked(true);
+                setAddressQuery(name);
                 setSuggestions([]);
 
-                await buildBestRoute(finalDestination, true, nextStops);
-                return;
+                setSearchSessionToken(makeSearchSessionToken());
+                await buildBestRoute(center, true);
+            } catch (e) {
+                console.warn("Suggestion retrieve failed: ", e);
+                setRouteError(String(e?.message ?? e));
             }
-
-            setAddressLocked(true);
-            setAddressQuery(name);
-            setSuggestions([]);
-
-            await buildBestRoute(center, true);
         },
-        [showAddStopSearch, tripStops, finalDestination, buildBestRoute]
+        [showAddStopSearch, tripStops, finalDestination, buildBestRoute, searchSessionToken]
     );
 
     // ── Banner logic ─────────────────────────────────────────────────
@@ -658,6 +799,8 @@ export default function MapScreen({ navigation }) {
         (navActive ? "Continue..." : null);
 
     const nextInstruction = nextStep?.maneuver?.instruction || null;
+
+    const turnSymbol = getManeuverSymbol(currentStep);
 
     const arrivalText =
         routeSummary?.durationSec != null
@@ -826,7 +969,7 @@ export default function MapScreen({ navigation }) {
                                     setAddressQuery(t);
                                     setRouteError("");
                                 }}
-                                placeholder="Enter destination address..."
+                                placeholder="Enter destination..."
                                 placeholderTextColor="#9aa0a6"
                                 style={styles.searchInput}
                                 autoCorrect={false}
@@ -872,7 +1015,7 @@ export default function MapScreen({ navigation }) {
                                     <FlatList
                                         data={suggestions}
                                         keyExtractor={(item, idx) =>
-                                            item.id ?? item.place_name ?? String(idx)
+                                            item.mapbox_id ?? item.name ?? String(idx)
                                         }
                                         keyboardShouldPersistTaps="handled"
                                         renderItem={({ item }) => (
@@ -881,8 +1024,11 @@ export default function MapScreen({ navigation }) {
                                                 activeOpacity={0.85}
                                                 onPress={() => onPickSuggestion(item)}
                                             >
-                                                <Text style={styles.suggestText} numberOfLines={2}>
-                                                    {item.place_name}
+                                                <Text style={styles.suggestTitle} numberOfLines={1}>
+                                                    {getSuggestionTitle(item)}
+                                                </Text>
+                                                <Text style={styles.suggestSubtitle} numberOfLines={2}>
+                                                    {getSuggestionSubtitle(item)}
                                                 </Text>
                                             </TouchableOpacity>
                                         )}
@@ -895,14 +1041,16 @@ export default function MapScreen({ navigation }) {
 
                 {navActive && (
                     <View style={styles.topNavBanner}>
-                         <View style={styles.topNavLeft}>
+                         <View style={styles.topNavMainRow}>
                             <View style={styles.turnIcon}>
-                                <Text style={styles.turnIconText}>↻</Text>
+                                <Text style={styles.turnIconText}>{turnSymbol}</Text>
                             </View>
+
                             <View style={styles.topNavTextWrap}>
                                 <Text style={styles.topNavTitle} numberOfLines={2}>
                                     {stepInstruction || "Continue..."}
                                 </Text>
+
                                 {!!nextInstruction && (
                                     <Text style={styles.topNavSubtitle} numberOfLines={1}>
                                         Next: {nextInstruction}
@@ -911,29 +1059,39 @@ export default function MapScreen({ navigation }) {
                             </View>
                          </View>
 
-                         <TouchableOpacity
-                            style={styles.topNavEnd}
-                            activeOpacity={0.85}
-                            onPress={endNav}
-                         >
-                            <Text style={styles.topNavEndText}>End</Text>
-                         </TouchableOpacity>
+                         <View style={styles.topNavButtonsRow}>
+                            <TouchableOpacity
+                                style={styles.topNavStops}
+                                activeOpacity={0.85}
+                                onPress={() => setShowStopsModal(true)}
+                            >
+                                <Text style={styles.topNavStopsText}>Stops</Text>
+                            </TouchableOpacity>
 
-                         <TouchableOpacity
-                            style={styles.topNavAddStop}
-                            activeOpacity={0.85}
-                            onPress={() => {
-                                setShowAddStopSearch((v) => !v);
-                                setPendingStopQuery("");
-                                setPendingStopLocked(false);
-                                setSuggestions([]);
-                                setRouteError("");
-                            }}
-                         >
-                            <Text style={styles.topNavAddStopText}>
-                                {showAddStopSearch ? "Close" : "Add Stop"}
-                            </Text>
-                         </TouchableOpacity>
+                            <TouchableOpacity
+                                style={styles.topNavAddStop}
+                                activeOpacity={0.85}
+                                onPress={() => {
+                                    setShowAddStopSearch((v) => !v);
+                                    setPendingStopQuery("");
+                                    setPendingStopLocked(false);
+                                    setSuggestions([]);
+                                    setRouteError("");
+                                }}
+                            >
+                                <Text style={styles.topNavAddStopText}>
+                                    {showAddStopSearch ? "Close" : "Add Stop"}
+                                </Text>
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
+                                style={styles.topNavEnd}
+                                activeOpacity={0.85}
+                                onPress={endNav}
+                            >
+                                <Text style={styles.topNavEndText}>End</Text>
+                            </TouchableOpacity>
+                         </View>
                     </View>
                 )}
 
@@ -967,7 +1125,7 @@ export default function MapScreen({ navigation }) {
                                     <FlatList
                                         data={suggestions}
                                         keyExtractor={(item, idx) =>
-                                            item.id ?? item.place_name ?? String(idx)
+                                            item.mapbox_id ?? item.name ?? String(idx)
                                         }
                                         keyboardShouldPersistTaps="handled"
                                         renderItem={({ item }) => (
@@ -976,8 +1134,11 @@ export default function MapScreen({ navigation }) {
                                                 activeOpacity={0.85}
                                                 onPress={() => onPickSuggestion(item)}
                                             >
-                                                <Text style={styles.suggestText} numberOfLines={2}>
-                                                    {item.place_name}
+                                                <Text style={styles.suggestTitle} numberOfLines={1}>
+                                                    {getSuggestionTitle(item)}
+                                                </Text>
+                                                <Text style={styles.suggestSubtitle} numberOfLines={2}>
+                                                    {getSuggestionSubtitle(item)}
                                                 </Text>
                                             </TouchableOpacity>
                                         )}
@@ -988,16 +1149,53 @@ export default function MapScreen({ navigation }) {
                     </View>
                 )}
 
-                {navActive && tripStops.length > 0 && (
-                    <View style={styles.stopListCard}>
-                        <Text style={styles.stopListTitle}>Stop</Text>
-                        {tripStops.map((stop, idx) => (
-                            <Text key={`${stop.name}-${idx}`} style={styles.stopListItem}>
-                                {idx + 1}. {stop.name}
-                            </Text>
-                        ))}
+                <Modal
+                    visible={showStopsModal}
+                    transparent
+                    animationType="fade"
+                    onRequestClose={() => setShowStopsModal(false)}
+                >
+                    <View style={styles.stopsModalBackdrop}>
+                        <View style={styles.stopsModalCard}>
+                            <View style={styles.stopsModalHeader}>
+                                <Text style={styles.stopsModalTitle}>Trip Stops</Text>
+
+                                <TouchableOpacity
+                                    activeOpacity={0.85}
+                                    onPress={() => setShowStopsModal(false)}
+                                >
+                                    <Text style={styles.stopsModalClose}>X</Text>
+                                </TouchableOpacity>
+                            </View>
+
+                            <View style={styles.stopsModalBody}>
+                                {tripStops.length > 0 && (
+                                    <>
+                                        <Text style={styles.stopsSectionLabel}>Added Stops</Text>
+                                        {tripStops.map((stop, idx) => (
+                                            <View key={`${stop.name}-${idx}`} style={styles.stopRow}>
+                                                <Text style={styles.stopIndex}>{idx + 1}.</Text>
+                                                <Text style={styles.stopName}>{stop.name}</Text>
+                                            </View>
+                                        ))}
+                                    </>
+                                )}
+
+                                <Text style={styles.stopsSectionLabel}>Final Destination</Text>
+                                <View style={styles.stopRow}>
+                                    <Text style={styles.stopIndex}>★</Text>
+                                    <Text style={styles.stopName}>
+                                        {addressQuery || "Destination"}
+                                    </Text>
+                                </View>
+
+                                {tripStops.length === 0 && !addressQuery ? (
+                                    <Text style={styles.noStopsText}>No stops added yet.</Text>
+                                ) : null}
+                            </View>
+                        </View>
                     </View>
-                )}
+                </Modal>
 
                 {navActive && routeSummary && (
                     <View style={styles.bottomEtaCard}>
@@ -1042,26 +1240,6 @@ export default function MapScreen({ navigation }) {
                         <Text style={styles.routeErrorText}>{routeError}</Text>
                     </View>
                 ) : null}
-
-                {loadingDetections && (
-                    <View style={styles.loadingBadge}>
-                        <ActivityIndicator size="small" color="#71B07B" />
-                        <Text style={styles.loadingText}>Loading detections...</Text>
-                    </View>
-                )}
-
-                {!loadingDetections && detectionGeoJSON && (
-                    <TouchableOpacity
-                        style={styles.countBadge}
-                        activeOpacity={0.7}
-                        onPress={() => loadDetections(true)}
-                    >
-                        <Text style={styles.countText}>
-                            {filteredGeoJSON?.features?.length ?? 0} detections
-                        </Text>
-                        <Text style={styles.refreshIcon}>↻</Text>
-                    </TouchableOpacity>
-                )}
 
                 {showBanner && (
                     <View style={[styles.permissionBanner, { backgroundColor: theme.card ?? "#222" }]}>
@@ -1154,15 +1332,15 @@ const styles = StyleSheet.create({
     // Search section
     searchShell: {
         position: "absolute",
-        top: 80,
+        top: 50,
         left: 14,
         right: 14,
-        backgroundColor: "#1f1f1f",
-        borderRadius: 14,
-        paddingHorizontal: 10,
-        paddingVertical: 10,
+        backgroundColor: "rgba(22,22,22,0.96)",
+        borderRadius: 18,
+        paddingHorizontal: 12,
+        paddingVertical: 12,
         gap: 10,
-        elevation: 6,
+        elevation: 8,
     },
     searchRow: {
         flexDirection: "row",
@@ -1212,9 +1390,16 @@ const styles = StyleSheet.create({
         borderBottomWidth: StyleSheet.hairlineWidth,
         borderBottomColor: "rgba(255,255,255,0.10)",
     },
-    suggestText: {
+    suggestTitle: {
         color: "#fff",
-        fontSize: 13,
+        fontSize: 14,
+        fontWeight: "700",
+    },
+    suggestSubtitle: {
+        color: "rgba(255,255,255,0.72)",
+        fontSize: 12,
+        marginTop: 3,
+        lineHeight: 16,
     },
     suggestLoadingRow: {
         flexDirection: "row",
@@ -1231,44 +1416,49 @@ const styles = StyleSheet.create({
     // Top banner
     topNavBanner: {
         position: "absolute",
-        top: 80,
+        top: 50,
         left: 14,
         right: 14,
-        backgroundColor: "rgba(20,20,20,0.92)",
-        borderRadius: 18,
-        paddingVertical: 12,
-        paddingHorizontal: 12,
+        backgroundColor: "rgba(22,22,22,0.96)",
+        borderRadius: 20,
+        paddingVertical: 14,
+        paddingHorizontal: 14,
         elevation: 10,
+    },
+    topNavMainRow: {
+        flexDirection: "row",
+        alignItems: "flex-start",
     },
     topNavLeft: {
         flexDirection: "row",
+        alignItems: "flex-start",
+        flex: 1,
+    },
+    topNavStops: {
+        backgroundColor: "#71B07B",
+        paddingHorizontal: 16,
+        paddingVertical: 10,
+        borderRadius: 14,
+        minWidth: 92,
         alignItems: "center",
-        gap: 10,
+    },
+    topNavStopsText: {
+        color: "#fff",
+        fontWeight: "800",
+        fontSize: 13,
     },
     topNavAddStop: {
-        position: "absolute",
-        right: 12,
-        top: 52,
+        alignItems: "center",
+        minWidth: 92,
         backgroundColor: "#71B07B",
-        paddingHorizontal: 12,
-        paddingVertical: 8,
+        paddingHorizontal: 16,
+        paddingVertical: 10,
         borderRadius: 14,
     },
     topNavAddStopText: {
         color: "#fff",
-        fontWeight: "900",
-    },
-    addStopShell: {
-        position: "absolute",
-        top: 150,
-        left: 14,
-        right: 14,
-        backgroundColor: "#1f1f1f",
-        borderRadius: 14,
-        paddingHorizontal: 10,
-        paddingVertical: 10,
-        gap: 10,
-        elevation: 10,
+        fontWeight: "800",
+        fontSize: 13,
     },
     stopListCard: {
         position: "absolute",
@@ -1292,47 +1482,130 @@ const styles = StyleSheet.create({
         fontSize: 12,
         marginBottom: 4,
     },
+    stopsModalBackdrop: {
+        flex: 1,
+        backgroundColor: "rgba(0,0,0,0.45)",
+        justifyContent: "center",
+        alignItems: "center",
+        paddingHorizontal: 20,
+    },
+    stopsModalCard: {
+        width: "100%",
+        maxWidth: 360,
+        backgroundColor: "#1f1f1f",
+        borderRadius: 20,
+        paddingHorizontal: 16,
+        paddingVertical: 16,
+        elevation: 12,
+    },
+    stopsModalHeader: {
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-between",
+        marginBottom: 12,
+    },
+    stopsModalTitle: {
+        color: "#fff",
+        fontSize: 18,
+        fontWeight: "800",
+    },
+    stopsModalClose: {
+        color: "#fff",
+        fontSize: 18,
+        fontWeight: "800",
+        paddingHorizontal: 6,
+    },
+    stopsModalBody: {
+        gap: 10,
+    },
+    stopsSectionLabel: {
+        color: "#71B07B",
+        fontSize: 13,
+        fontWeight: "800",
+        marginTop: 4,
+    },
+    stopRow: {
+        flexDirection: "row",
+        alignItems: "flex-start",
+        gap: 8,
+        paddingVertical: 4,
+    },
+    stopIndex: {
+        color: "#fff",
+        fontSize: 14,
+        fontWeight: "800",
+        width: 18,
+    },
+    stopName: {
+        color: "rgba(255,255,255,0.9)",
+        fontSize: 14,
+        flex: 1,
+    },
+    noStopsText: {
+        color: "rgba(255,255,255,0.75)",
+        fontSize: 14,
+    },
     turnIcon: {
-        width: 44,
-        height: 44,
-        borderRadius: 22,
-        backgroundColor: "rgba(255,255,255,0.10)",
+        width: 42,
+        height: 42,
+        borderRadius: 21,
+        backgroundColor: "rgba(255,255,255,0.08)",
         alignItems: "center",
         justifyContent: "center",
+        marginRight: 12,
+        marginTop: 2,
     },
     turnIconText: {
         color: "#fff",
         fontSize: 20,
-        fontWeight: "900",
+        fontWeight: "800",
     },
     topNavTextWrap: {
         flex: 1,
+        paddingRight: 4,
     },
     topNavTitle: {
         color: "#fff",
-        fontSize: 16,
-        fontWeight: "900",
+        fontSize: 18,
+        fontWeight: "800",
+        lineHeight: 24,
     },
     topNavSubtitle: {
-        marginTop: 4,
-        color: "rgba(255,255,255,0.75)",
-        fontSize: 12,
-        fontWeight: "700",
+        marginTop: 6,
+        color: "rgba(255,255,255,0.78)",
+        fontSize: 13,
+        fontWeight: "600",
     },
     topNavEnd: {
-        position: "absolute",
-        right: 12,
-        top: 12,
         backgroundColor: "rgba(255,255,255,0.10)",
-        paddingHorizontal: 12,
-        paddingVertical: 8,
+        paddingHorizontal: 16,
+        paddingVertical: 10,
         borderRadius: 14,
+        minWidth: 74,
+        alignItems: "center",
     },
     topNavEndText: {
         color: "#fff",
-        fontWeight: "900",
+        fontWeight: "800",
+        fontSize: 13,
     },
-
+    topNavButtonsRow: {
+        flexDirection: "row",
+        justifyContent: "flex-end",
+        marginTop: 12,
+        gap: 10,
+    },
+    addStopShell: {
+        position: "absolute",
+        top: 200,
+        left: 14,
+        right: 14,
+        backgroundColor: "rgba(22,22,22,0.97)",
+        borderRadius: 18,
+        paddingHorizontal: 12,
+        paddingVertical: 12,
+        elevation: 10,
+    },
     card: {
         backgroundColor: "#1f1f1f",
         borderRadius: 12,
@@ -1387,26 +1660,26 @@ const styles = StyleSheet.create({
         position: "absolute",
         left: 14,
         right: 14,
-        bottom: 120,
-        backgroundColor: "rgba(245,245,245,0.96)",
-        borderRadius: 22,
+        bottom: 118,
+        backgroundColor: "rgba(255,255,255,0.97)",
+        borderRadius: 24,
         paddingTop: 10,
-        paddingBottom: 12,
-        paddingHorizontal: 14,
+        paddingBottom: 14,
+        paddingHorizontal: 16,
         elevation: 12,
     },
     bottomHandle: {
         alignSelf: "center",
-        width: 44,
-        height: 5,
-        borderRadius: 3,
-        backgroundColor: "rgba(0,0,0,0.15)",
-        marginBottom: 10,
+        width: 42,
+        height: 4,
+        borderRadius: 2,
+        backgroundColor: "rgba(0,0,0,0.18)",
+        marginBottom: 12,
     },
     etaRow: {
         flexDirection: "row",
         justifyContent: "space-between",
-        paddingHorizontal: 8,
+        alignItems: "center",
     },
     etaCol: {
         alignItems: "center",
@@ -1415,23 +1688,25 @@ const styles = StyleSheet.create({
     etaValue: {
         color: "#111",
         fontSize: 18,
-        fontWeight: "900",
+        fontWeight: "800",
     },
     etaLabel: {
         marginTop: 2,
         color: "rgba(0,0,0,0.55)",
         fontSize: 12,
-        fontWeight: "800",
-        textTransform: "lowercase",
+        fontWeight: "600",
     },
     etaMetaRow: {
-    marginTop: 10,
-    alignItems: "center",
+        marginTop: 12,
+        paddingTop: 10,
+        borderTopWidth: StyleSheet.hairlineWidth,
+        borderTopColor: "rgba(0,0,0,0.12)",
     },
     etaMetaText: {
-        color: "rgba(0,0,0,0.65)",
-        fontSize: 12,
-        fontWeight: "800",
+        textAlign: "center",
+        color: "rgba(0,0,0,0.68)",
+        fontSize: 13,
+        fontWeight: "600",
     },
 
     // Route summary
@@ -1485,47 +1760,6 @@ const styles = StyleSheet.create({
         marginTop: 6,
         fontSize: 12,
         opacity: 0.9,
-    },
-
-    // Loading and count
-    loadingBadge: {
-        position: "absolute",
-        top: 18,
-        right: 14,
-        flexDirection: "row",
-        alignItems: "center",
-        backgroundColor: "#1f1f1f",
-        paddingHorizontal: 12,
-        paddingVertical: 6,
-        borderRadius: 16,
-        elevation: 4,
-    },
-    loadingText: {
-        color: "#fff",
-        fontSize: 12,
-        marginLeft: 6,
-    },
-    countBadge: {
-        position: "absolute",
-        top: 18,
-        right: 14,
-        flexDirection: "row",
-        alignItems: "center",
-        backgroundColor: "#1f1f1f",
-        paddingHorizontal: 12,
-        paddingVertical: 6,
-        borderRadius: 16,
-        elevation: 4,
-    },
-    countText: {
-        color: "#fff",
-        fontSize: 12,
-    },
-    refreshIcon: {
-        color: "#71B07B",
-        fontSize: 16,
-        marginLeft: 6,
-        fontWeight: "bold",
     },
 
     // Bottom screen nav bar
