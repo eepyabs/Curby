@@ -3,6 +3,7 @@ import { View, Text, TextInput, StyleSheet, TouchableOpacity, Animated, Easing, 
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { BlurView } from 'expo-blur';
 import { Video } from 'expo-av';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createUser, loginUser } from '../services/firestoreService';
 
 export default function Login({ navigation }) {
@@ -42,8 +43,10 @@ export default function Login({ navigation }) {
         setLoading(true);
         try {
             const user = await loginUser(username.trim(), password);
-            console.log('Login success:', user.username);
-            navigation.replace('Map', { username: user.username ?? username.trim() });
+            const resolvedUsername = user.username ?? username.trim();
+            console.log('Login success:', resolvedUsername);
+            await AsyncStorage.setItem('username', resolvedUsername);
+            navigation.replace('Map', { username: resolvedUsername });
         } catch (e) {
             console.error('Login error:', e.message);
             setError(e.message || 'Login failed');

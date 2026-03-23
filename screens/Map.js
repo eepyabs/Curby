@@ -10,6 +10,7 @@ import AddDetectionSheet from '../components/AddDetectionSheet';
 import { useLocationPref } from "../LocationContext";
 import { useTheme } from "../ThemeContext";
 import { CATEGORIES, defaultClassFilter } from "../constants/detectionClasses";
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createDetection, fetchDetectionsAsGeoJSON, deleteDetection } from "../services/firestoreService";
 
 const MAPBOX_TOKEN = "pk.eyJ1IjoiZGlydGlzaHV0IiwiYSI6ImNtbDgzaTl3MDAzZTYzZW9id2FlMjEyN3AifQ.4IaAvo6SoKCI3VbmYNyujg";
@@ -357,7 +358,14 @@ export default function MapScreen({ navigation, route }) {
     const [navSteps, setNavSteps] = useState([]);
     const [navStepIdx, setNavStepIdx] = useState(0);
 
-    const username = route?.params?.username ?? "anonymous";
+    const [username, setUsername] = useState(route?.params?.username ?? "anonymous");
+
+    useEffect(() => {
+        if (route?.params?.username) return; // already have it from params
+        AsyncStorage.getItem('username').then((stored) => {
+            if (stored) setUsername(stored);
+        });
+    }, []);
 
     // Filtered GeoJSON -- recomputed when filter or data changes
     const filteredGeoJSON = useMemo(() => {
