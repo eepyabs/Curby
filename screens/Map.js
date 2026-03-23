@@ -357,8 +357,7 @@ export default function MapScreen({ navigation, route }) {
     const [navSteps, setNavSteps] = useState([]);
     const [navStepIdx, setNavStepIdx] = useState(0);
 
-    const currentUser = route?.params?.currentUser || null;
-    const myUserId = currentUser?.id || currentUser?.username || "Unknown_user";
+    const username = route?.params?.username ?? "anonymous";
 
     // Filtered GeoJSON -- recomputed when filter or data changes
     const filteredGeoJSON = useMemo(() => {
@@ -786,7 +785,7 @@ export default function MapScreen({ navigation, route }) {
         selectedFeature?.properties?.source ??
         null;
 
-    const canDelete = selectedOwner === myUserId;
+    const canDelete = !!username && username !== "anonymous" && selectedOwner === username;
 
     // ── Render ───────────────────────────────────────────────────────
     return (
@@ -1288,8 +1287,8 @@ export default function MapScreen({ navigation, route }) {
                         try {
                             await createDetection({
                               ...data,
-                              sourceDeviceId: myUserId,
-                              createdBy: myUserId,
+                              sourceDeviceId: username,
+                              createdBy: username,
                               confidence: 1.0,
                             });
                             await loadDetections(true);
