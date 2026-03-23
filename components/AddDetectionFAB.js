@@ -1,21 +1,31 @@
-import { StyleSheet, TouchableOpacity } from "react-native";
+import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { PlusIcon } from "./NavIcons";
 
 /**
  * Floating action button for adding a detection.
  *
  * Props:
- *   active  – boolean, whether "add mode" is on (glows when active)
+ *   active  – boolean, "tap-to-place" mode is active (stopped only)
+ *   moving  – boolean, user's device is currently moving
  *   onPress – callback
+ *
+ * Behaviour:
+ *   moving=true  → bolt badge shown; one tap opens sheet at current location
+ *   moving=false → plus icon; first tap enters tap-to-place mode
  */
-export default function AddDetectionFAB({ active, onPress }) {
+export default function AddDetectionFAB({ active, moving, onPress }) {
   return (
     <TouchableOpacity
       style={[styles.fab, active && styles.fabActive]}
       activeOpacity={0.7}
       onPress={onPress}
     >
-      <PlusIcon size={28} color="#fff" />
+      <PlusIcon size={26} color="#fff" />
+      {moving && (
+        <View style={styles.movingBadge}>
+          <Text style={styles.movingBadgeText}>⚡</Text>
+        </View>
+      )}
     </TouchableOpacity>
   );
 }
@@ -43,5 +53,19 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.6,
     shadowRadius: 12,
     elevation: 12,
+  },
+  movingBadge: {
+    position: "absolute",
+    top: -4,
+    right: -4,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: "#1a1a1a",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  movingBadgeText: {
+    fontSize: 11,
   },
 });

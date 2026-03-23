@@ -330,6 +330,7 @@ export default function MapScreen({ navigation, route }) {
     const [addMode, setAddMode] = useState(false);
     const [addCoordinate, setAddCoordinate] = useState(null);
     const [showAddSheet, setShowAddSheet] = useState(false);
+    const [isMoving, setIsMoving] = useState(false);
 
     // Autocomplete state
     const [suggestions, setSuggestions] = useState([]);
@@ -525,6 +526,8 @@ export default function MapScreen({ navigation, route }) {
                 (loc) => {
                     if (!isGoodFix(loc)) return;
                     setUserCoords([loc.coords.longitude, loc.coords.latitude]);
+                    const speed = loc.coords.speed ?? 0;
+                    setIsMoving(speed > 2); // >2 m/s (~4.5 mph) = moving
                 }
             );
             watchSubRef.current = sub;
@@ -840,7 +843,7 @@ export default function MapScreen({ navigation, route }) {
                         <Mapbox.PointAnnotation id="dest" coordinate={destinationCoords} />
                     )}
 
-                    {/* Heatmap */}
+                    {/* Heatmap — fully fades out by zoom 14 */}
                     {filteredGeoJSON && filteredGeoJSON.features.length > 0 && (
                         <Mapbox.ShapeSource id="heatmap-src" shape={filteredGeoJSON}>
                             <Mapbox.HeatmapLayer
@@ -848,28 +851,21 @@ export default function MapScreen({ navigation, route }) {
                                 style={{
                                     heatmapRadius: [
                                         "interpolate", ["linear"], ["zoom"],
-                                        6,  8,
-                                        10, 15,
-                                        14, 22,
-                                        18, 30,
+                                        6, 8, 10, 15, 14, 22,
                                     ],
                                     heatmapWeight: 1,
                                     heatmapIntensity: [
                                         "interpolate", ["linear"], ["zoom"],
-                                        6,  0.6,
-                                        10, 0.8,
-                                        14, 1,
-                                        18, 1.2,
+                                        6, 0.6, 10, 0.8, 14, 1,
                                     ],
                                     heatmapOpacity: [
                                         "interpolate", ["linear"], ["zoom"],
-                                        6,  0.8,
-                                        18, 0.85,
+                                        0,  0.85,
+                                        12, 0.85,
+                                        14, 0,
                                     ],
                                     heatmapColor: [
-                                        "interpolate",
-                                        ["linear"],
-                                        ["heatmap-density"],
+                                        "interpolate", ["linear"], ["heatmap-density"],
                                         0,    "rgba(0,0,0,0)",
                                         0.1,  "rgba(0,0,255,0.35)",
                                         0.3,  "rgba(0,200,255,0.55)",
@@ -883,20 +879,48 @@ export default function MapScreen({ navigation, route }) {
                         </Mapbox.ShapeSource>
                     )}
 
-                    {/* Tap targets for detections */}
+                    {/* Individual markers — fade in at zoom 13, icons at zoom 14 */}
                     {filteredGeoJSON && filteredGeoJSON.features.length > 0 && (
                         <Mapbox.ShapeSource
-                            id="detections-hit"
+                            id="detections-src"
                             shape={filteredGeoJSON}
                             onPress={onDetectionPress}
-                            hitbox={{ width: 24, height: 24 }}
+                            hitbox={{ width: 30, height: 30 }}
                         >
+                            {/* Coloured circle per detection */}
                             <Mapbox.CircleLayer
-                                id="detections-hit-circles"
+                                id="detection-circles"
                                 style={{
-                                    circleRadius: 14,
-                                    circleColor: "#000000",
-                                    circleOpacity: 0.001,
+                                    circleRadius: [
+                                        "interpolate", ["linear"], ["zoom"],
+                                        13, 8, 17, 14,
+                                    ],
+                                    circleColor: ["get", "markerColor"],
+                                    circleStrokeWidth: 2,
+                                    circleStrokeColor: "#ffffff",
+                                    circleOpacity: [
+                                        "interpolate", ["linear"], ["zoom"],
+                                        12, 0, 13, 1,
+                                    ],
+                                    circleStrokeOpacity: [
+                                        "interpolate", ["linear"], ["zoom"],
+                                        12, 0, 13, 1,
+                                    ],
+                                }}
+                            />
+                            {/* Emoji icon on top of circle */}
+                            <Mapbox.SymbolLayer
+                                id="detection-icons"
+                                style={{
+                                    textField: ["get", "emoji"],
+                                    textSize: 13,
+                                    textAnchor: "center",
+                                    textAllowOverlap: true,
+                                    textIgnorePlacement: true,
+                                    textOpacity: [
+                                        "interpolate", ["linear"], ["zoom"],
+                                        13, 0, 14, 1,
+                                    ],
                                 }}
                             />
                         </Mapbox.ShapeSource>
@@ -916,7 +940,7 @@ export default function MapScreen({ navigation, route }) {
                                     console.log("selectedFeature: ", selectedFeature);
                                     console.log("detectionId: ", detectionId);
                                     console.log("selectedOwner: ", selectedOwner);
-                                    console.log("myUserId: ", myUserId);
+                                    console.log("username: ", username);
 
                                     if (!detectionId) {
                                         console.warn("No detection ID found");
@@ -1239,7 +1263,21 @@ export default function MapScreen({ navigation, route }) {
                     </View>
                 )}
 
-                <AddDetectionFAB active={addMode} onPress={() => setAddMode((v) => !v)} />
+                <AddDetectionFAB
+                    active={addMode}
+                    moving={isMoving}
+                    onPress={() => {
+                        if (isMoving) {
+                            if (userCoords) {
+                                setAddCoordinate(userCoords);
+                                setShowAddSheet(true);
+                                setAddMode(false);
+                            }
+                        } else {
+                            setAddMode((v) => !v);
+                        }
+                    }}
+                />
 
                 <AddDetectionSheet
                     visible={showAddSheet}
