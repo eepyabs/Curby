@@ -14,6 +14,8 @@ import { createDetection, fetchDetectionsAsGeoJSON, deleteDetection } from "../s
 
 const MAPBOX_TOKEN = "pk.eyJ1IjoiZGlydGlzaHV0IiwiYSI6ImNtbDgzaTl3MDAzZTYzZW9id2FlMjEyN3AifQ.4IaAvo6SoKCI3VbmYNyujg";
 
+const SEARCH_COUNTRIES = "US,CA,MX,GB,FR,DE,ES,IT,NL,BE,CH,AT,IE,PT,SE,NO,DK,FI";
+
 Mapbox.setAccessToken(MAPBOX_TOKEN);
 Mapbox.setTelemetryEnabled(false);
 
@@ -115,7 +117,7 @@ async function geocodeAddressSingle(query, proximity) {
         q,
         access_token: MAPBOX_TOKEN,
         limit: "8",
-        country: "US",
+        country: SEARCH_COUNTRIES,
         language: "en",
     });
 
@@ -147,7 +149,7 @@ async function searchBoxSuggest(query, proximity, sessionToken) {
         access_token: MAPBOX_TOKEN,
         session_token: sessionToken,
         limit: "8",
-        country: "US",
+        country: SEARCH_COUNTRIES,
         language: "en",
     });
 
@@ -304,7 +306,7 @@ function makeSearchSessionToken() {
     return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-export default function MapScreen({ navigation }) {
+export default function MapScreen({ navigation, route }) {
     const { theme } = useTheme();
     const { locationEnabled } = useLocationPref();
 
@@ -354,7 +356,8 @@ export default function MapScreen({ navigation }) {
     const [navSteps, setNavSteps] = useState([]);
     const [navStepIdx, setNavStepIdx] = useState(0);
 
-    const myDeviceId = "android_app";
+    const currentUser = route?.params?.currentUser || null;
+    const myUserId = currentUser?.id || currentUser?.username || "Unknown_user";
 
     // Filtered GeoJSON -- recomputed when filter or data changes
     const filteredGeoJSON = useMemo(() => {
@@ -780,7 +783,7 @@ export default function MapScreen({ navigation }) {
         selectedFeature?.properties?.source ??
         null;
 
-    const canDelete = selectedOwner === myDeviceId;
+    const canDelete = selectedOwner === myUserId;
 
     // ── Render ───────────────────────────────────────────────────────
     return (
@@ -905,12 +908,15 @@ export default function MapScreen({ navigation }) {
                         <DetectionCallout
                             feature={selectedFeature}
                             canDelete={canDelete}
+                            onClose={() => setSelectedFeature(null)}
                             onDelete={async () => {
                                 try {
                                     const detectionId = selectedFeature?.properties?.id;
                                     console.log("DELETE BUTTON PRESSED");
                                     console.log("selectedFeature: ", selectedFeature);
                                     console.log("detectionId: ", detectionId);
+                                    console.log("selectedOwner: ", selectedOwner);
+                                    console.log("myUserId: ", myUserId);
 
                                     if (!detectionId) {
                                         console.warn("No detection ID found");
@@ -923,7 +929,8 @@ export default function MapScreen({ navigation }) {
                                     setSelectedFeature(null);
                                     await loadDetections(true);
                                 } catch (e) {
-                                    console.warn("Failed to delete detection: ", e);
+                                    console.warn("Failed to delete detection: ", e?.message ?? e);
+                                    console.warn("Full delete error: ", e);
                                 }
                             }}
                         />
@@ -1243,8 +1250,8 @@ export default function MapScreen({ navigation }) {
                         try {
                             await createDetection({
                               ...data,
-                              sourceDeviceId: myDeviceId,
-                              createdBy: myDeviceId,
+                              sourceDeviceId: myUserId,
+                              createdBy: myUserId,
                               confidence: 1.0,
                             });
                             await loadDetections(true);
