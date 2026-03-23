@@ -8,6 +8,7 @@ import {
     LaneMarkingsIcon,
     PeopleIcon,
     VehicleIcon,
+    ReportIcon,
 } from "./NavIcons";
 
 const SEVERITY_LABELS = ["", "Low", "Minor", "Moderate", "High", "Critical"];
@@ -42,9 +43,22 @@ function CategoryIcon({ catName, color, size = 18}) {
             return <PeopleIcon size={size} color={color} />;
         case "Vehicle":
             return <VehicleIcon size={size} color={color} />;
+        case "Reports":
+            return <ReportIcon size={size} color={color} />;
         default:
             return null;
     }
+}
+
+function formatExpiry(expiresAt) {
+    if (!expiresAt) return null;
+    const ms = new Date(expiresAt).getTime() - Date.now();
+    if (ms <= 0) return "Expired";
+    const min = Math.round(ms / 60000);
+    if (min < 60) return `${min}m left`;
+    const hr = Math.floor(min / 60);
+    const rem = min % 60;
+    return rem > 0 ? `${hr}h ${rem}m left` : `${hr}h left`;
 }
 
 /**
@@ -59,8 +73,11 @@ export default function DetectionCallout({ feature, canDelete = false, onDelete,
   const p = feature?.properties;
   if (!p) return null;
 
-  const severity = Math.max(1, Math.min(5, p.severity ?? 1));
+  const severity = p.severity ? Math.max(1, Math.min(5, p.severity)) : null;
   const confidence = ((p.confidence ?? 0) * 100).toFixed(0);
+  const expiryText = formatExpiry(p.expiresAt);
+  const reporter = p.createdBy && p.createdBy !== "unknown" && p.createdBy !== "android_app"
+    ? p.createdBy : null;
 
   const typeName = p.type ?? "Unknown";
   const catName = getCategoryNameForType(typeName);
@@ -81,33 +98,48 @@ export default function DetectionCallout({ feature, canDelete = false, onDelete,
             </TouchableOpacity>
         </View>
 
-        <View style={styles.row}>
-            <Text style={styles.label}>Severity</Text>
-            <View style={styles.severityRow}>
-                {[1, 2, 3, 4, 5].map((n) => (
-                    <View
-                        key={n}
-                        style={[
-                            styles.severityDot,
-                            { backgroundColor: n <= severity ? SEVERITY_COLORS[severity] : "#333" },
-                        ]}
-                    />
-                ))}
-                <Text style={[styles.severityLabel, { color: SEVERITY_COLORS[severity] }]}>
-                    {SEVERITY_LABELS[severity]}
+        {severity !== null && (
+            <View style={styles.row}>
+                <Text style={styles.label}>Severity</Text>
+                <View style={styles.severityRow}>
+                    {[1, 2, 3, 4, 5].map((n) => (
+                        <View
+                            key={n}
+                            style={[
+                                styles.severityDot,
+                                { backgroundColor: n <= severity ? SEVERITY_COLORS[severity] : "#333" },
+                            ]}
+                        />
+                    ))}
+                    <Text style={[styles.severityLabel, { color: SEVERITY_COLORS[severity] }]}>
+                        {SEVERITY_LABELS[severity]}
+                    </Text>
+                </View>
+            </View>
+        )}
+
+        {p.source !== "user" && (
+            <View style={styles.row}>
+                <Text style={styles.label}>Confidence</Text>
+                <Text style={styles.value}>{confidence}%</Text>
+            </View>
+        )}
+
+        {reporter && (
+            <View style={styles.row}>
+                <Text style={styles.label}>Reported by</Text>
+                <Text style={styles.value}>{reporter}</Text>
+            </View>
+        )}
+
+        {expiryText && (
+            <View style={styles.row}>
+                <Text style={styles.label}>Expires</Text>
+                <Text style={[styles.value, expiryText === "Expired" && { color: "#FF4444" }]}>
+                    {expiryText}
                 </Text>
             </View>
-        </View>
-
-        <View style={styles.row}>
-            <Text style={styles.label}>Confidence</Text>
-            <Text style={styles.value}>{confidence}%</Text>
-        </View>
-
-        <View style={styles.row}>
-            <Text style={styles.label}>Source</Text>
-            <Text style={styles.value}>{p.source ?? "unknown"}</Text>
-        </View>
+        )}
 
         {canDelete && (
             <TouchableOpacity

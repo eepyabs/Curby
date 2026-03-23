@@ -131,6 +131,19 @@ export const PeopleIcon = ({ size = 18, color = "#ffffff" }) => (
     </Svg>
 );
 
+export const ReportIcon = ({ size = 18, color = "#ffffff" }) => (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+        <Path
+            d="M3 20V5l16-3v16L3 20z"
+            fill="none"
+            stroke={color}
+            strokeWidth={2}
+            strokeLinejoin="round"
+        />
+        <Line x1="3" y1="12.5" x2="3" y2="22" stroke={color} strokeWidth={2} strokeLinecap="round" />
+    </Svg>
+);
+
 export const VehicleIcon = ({ size = 18, color = "#ffffff" }) => (
     <Svg width={size} height={size} viewBox="0 0 24 24">
         <Path

@@ -8,44 +8,53 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { CATEGORIES } from "../constants/detectionClasses";
-
-const SEVERITY_LEVELS = [
-  { value: 1, label: "1", description: "Low" },
-  { value: 2, label: "2", description: "Minor" },
-  { value: 3, label: "3", description: "Moderate" },
-  { value: 4, label: "4", description: "High" },
-  { value: 5, label: "5", description: "Critical" },
-];
+import { USER_REPORT_CATEGORIES } from "../constants/detectionClasses";
 
 /**
- * Bottom-sheet modal for reporting a new detection.
+ * Waze-style bottom sheet for reporting a hazard.
+ *
+ * Flow:
+ *   1. User taps a type tile → if no severity needed, submits immediately
+ *   2. If severity needed, severity chips appear → tapping one submits immediately
  *
  * Props:
  *   visible      – boolean
  *   coordinate   – [lon, lat]
- *   onSubmit     – ({ type, severity, latitude, longitude }) => void
+ *   onSubmit     – ({ type, severity, latitude, longitude, expiryMinutes }) => void
  *   onCancel     – () => void
  */
 export default function AddDetectionSheet({ visible, coordinate, onSubmit, onCancel }) {
-  const [selectedType, setSelectedType] = useState(null);
-  const [severity, setSeverity] = useState(3);
+  const [pendingType, setPendingType] = useState(null);
 
-  const handleSubmit = () => {
-    if (!selectedType || !coordinate) return;
+  const handleTypePress = (type, catColor) => {
+    if (!coordinate) return;
+    if (!type.hasSeverity) {
+      submitReport(type.key, null, type.expiryMinutes);
+    } else {
+      setPendingType({ ...type, color: catColor });
+    }
+  };
+
+  const handleSeverityPress = (idx) => {
+    if (!pendingType || !coordinate) return;
+    // index 0 = minor/first → severity 2, index 1 = major/second → severity 5
+    const severity = idx === 0 ? 2 : 5;
+    submitReport(pendingType.key, severity, pendingType.expiryMinutes);
+  };
+
+  const submitReport = (type, severity, expiryMinutes) => {
     onSubmit({
-      type: selectedType,
+      type,
       severity,
       latitude: coordinate[1],
       longitude: coordinate[0],
+      expiryMinutes,
     });
-    setSelectedType(null);
-    setSeverity(3);
+    setPendingType(null);
   };
 
   const handleCancel = () => {
-    setSelectedType(null);
-    setSeverity(3);
+    setPendingType(null);
     onCancel();
   };
 
@@ -58,132 +67,113 @@ export default function AddDetectionSheet({ visible, coordinate, onSubmit, onCan
     >
       <Pressable style={styles.overlay} onPress={handleCancel}>
         <Pressable style={styles.sheet} onPress={() => {}}>
+          <View style={styles.handle} />
+
           {/* Header */}
           <View style={styles.header}>
-            <Text style={styles.headerTitle}>Report Detection</Text>
+            <Text style={styles.headerTitle}>
+              {pendingType
+                ? `${pendingType.emoji}  ${pendingType.label}`
+                : "Report Hazard"}
+            </Text>
             <TouchableOpacity onPress={handleCancel} hitSlop={12}>
               <Text style={styles.closeBtn}>✕</Text>
             </TouchableOpacity>
           </View>
 
-          {/* Location display */}
-          {coordinate && (
-            <View style={styles.locationRow}>
-              <Text style={styles.locationLabel}>Location</Text>
-              <Text style={styles.locationValue}>
-                {coordinate[1].toFixed(5)}, {coordinate[0].toFixed(5)}
-              </Text>
-            </View>
-          )}
-
-          {/* Type picker */}
-          <Text style={styles.sectionTitle}>Type</Text>
-          <ScrollView style={styles.typeList} nestedScrollEnabled>
-            {Object.entries(CATEGORIES).map(([catName, cat]) => (
-              <View key={catName}>
-                <View style={styles.catHeader}>
-                  <View style={[styles.catDot, { backgroundColor: cat.color }]} />
-                  <Text style={styles.catName}>{catName}</Text>
-                </View>
-                {cat.classes.map((cls) => (
+          {pendingType ? (
+            /* ── Step 2: Severity quick-pick ── */
+            <View style={styles.severityStep}>
+              <Text style={styles.severityPrompt}>How bad?</Text>
+              <View style={styles.severityBtnRow}>
+                {pendingType.severityLabels.map((label, idx) => (
                   <TouchableOpacity
-                    key={cls}
-                    style={[
-                      styles.classItem,
-                      selectedType === cls && styles.classItemSelected,
-                    ]}
+                    key={label}
+                    style={[styles.severityChip, { borderColor: pendingType.color }]}
                     activeOpacity={0.7}
-                    onPress={() => setSelectedType(cls)}
+                    onPress={() => handleSeverityPress(idx)}
                   >
-                    <Text
-                      style={[
-                        styles.classText,
-                        selectedType === cls && styles.classTextSelected,
-                      ]}
-                    >
-                      {cls}
+                    <Text style={[styles.severityChipText, { color: pendingType.color }]}>
+                      {label}
                     </Text>
                   </TouchableOpacity>
                 ))}
               </View>
-            ))}
-          </ScrollView>
-
-          {/* Severity picker */}
-          <Text style={styles.sectionTitle}>Severity</Text>
-          <View style={styles.severityRow}>
-            {SEVERITY_LEVELS.map((s) => (
-              <TouchableOpacity
-                key={s.value}
-                style={[
-                  styles.severityBtn,
-                  severity === s.value && styles.severityBtnActive,
-                ]}
-                activeOpacity={0.7}
-                onPress={() => setSeverity(s.value)}
-              >
-                <Text
-                  style={[
-                    styles.severityNum,
-                    severity === s.value && styles.severityNumActive,
-                  ]}
-                >
-                  {s.label}
-                </Text>
-                <Text
-                  style={[
-                    styles.severityDesc,
-                    severity === s.value && styles.severityDescActive,
-                  ]}
-                >
-                  {s.description}
-                </Text>
+              <TouchableOpacity style={styles.backBtn} onPress={() => setPendingType(null)}>
+                <Text style={styles.backBtnText}>← Back</Text>
               </TouchableOpacity>
-            ))}
-          </View>
-
-          {/* Action buttons */}
-          <View style={styles.actions}>
-            <TouchableOpacity
-              style={[styles.submitBtn, !selectedType && styles.submitBtnDisabled]}
-              activeOpacity={0.7}
-              onPress={handleSubmit}
-              disabled={!selectedType}
+            </View>
+          ) : (
+            /* ── Step 1: Type grid ── */
+            <ScrollView
+              style={styles.scroll}
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={styles.scrollContent}
             >
-              <Text style={styles.submitText}>Submit</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.cancelBtn}
-              activeOpacity={0.7}
-              onPress={handleCancel}
-            >
-              <Text style={styles.cancelText}>Cancel</Text>
-            </TouchableOpacity>
-          </View>
+              {USER_REPORT_CATEGORIES.map((cat) => (
+                <View key={cat.label} style={styles.catSection}>
+                  <View style={styles.catHeaderRow}>
+                    <View style={[styles.catDot, { backgroundColor: cat.color }]} />
+                    <Text style={styles.catLabel}>{cat.label}</Text>
+                  </View>
+                  <View style={styles.tilesRow}>
+                    {cat.types.map((type) => (
+                      <TouchableOpacity
+                        key={type.key}
+                        style={styles.tile}
+                        activeOpacity={0.7}
+                        onPress={() => handleTypePress(type, cat.color)}
+                      >
+                        <View style={[styles.tileIconBg, { backgroundColor: cat.color + "28" }]}>
+                          <Text style={styles.tileEmoji}>{type.emoji}</Text>
+                        </View>
+                        <Text style={styles.tileLabel} numberOfLines={2}>
+                          {type.label}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
+              ))}
+            </ScrollView>
+          )}
         </Pressable>
       </Pressable>
     </Modal>
   );
 }
 
+const TILE_SIZE = 82;
+
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.5)",
+    backgroundColor: "rgba(0,0,0,0.55)",
     justifyContent: "flex-end",
   },
   sheet: {
-    backgroundColor: "#1f1f1f",
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    padding: 16,
+    backgroundColor: "#1a1a1a",
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingHorizontal: 16,
+    paddingBottom: 24,
     maxHeight: "80%",
+  },
+  handle: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: "#444",
+    alignSelf: "center",
+    marginTop: 10,
+    marginBottom: 6,
   },
   header: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 12,
+    paddingVertical: 10,
+    marginBottom: 4,
   },
   headerTitle: {
     color: "#fff",
@@ -191,134 +181,100 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
   closeBtn: {
-    color: "#aaa",
+    color: "#888",
     fontSize: 20,
     fontWeight: "700",
   },
-  locationRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    backgroundColor: "#2a2a2a",
-    borderRadius: 8,
-    padding: 10,
-    marginBottom: 12,
+  scroll: {
+    flexGrow: 0,
   },
-  locationLabel: {
-    color: "#aaa",
-    fontSize: 12,
+  scrollContent: {
+    paddingBottom: 8,
   },
-  locationValue: {
-    color: "#71B07B",
-    fontSize: 13,
-    fontWeight: "600",
-  },
-  sectionTitle: {
-    color: "#fff",
-    fontSize: 14,
-    fontWeight: "600",
-    marginBottom: 8,
-    marginTop: 4,
-  },
-  typeList: {
-    maxHeight: 220,
-    marginBottom: 12,
-  },
-  catHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingVertical: 6,
-    paddingHorizontal: 4,
-  },
-  catDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    marginRight: 8,
-  },
-  catName: {
-    color: "#ccc",
-    fontSize: 13,
-    fontWeight: "700",
-  },
-  classItem: {
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    borderRadius: 6,
-    marginVertical: 1,
-  },
-  classItemSelected: {
-    backgroundColor: "rgba(113,176,123,0.2)",
-  },
-  classText: {
-    color: "#aaa",
-    fontSize: 14,
-  },
-  classTextSelected: {
-    color: "#71B07B",
-    fontWeight: "600",
-  },
-  severityRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
+  catSection: {
     marginBottom: 16,
+  },
+  catHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 10,
     gap: 6,
   },
-  severityBtn: {
-    flex: 1,
-    alignItems: "center",
-    paddingVertical: 10,
-    borderRadius: 8,
-    backgroundColor: "#2a2a2a",
+  catDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
   },
-  severityBtnActive: {
-    backgroundColor: "#71B07B",
-  },
-  severityNum: {
-    color: "#aaa",
-    fontSize: 16,
+  catLabel: {
+    color: "#bbb",
+    fontSize: 11,
     fontWeight: "700",
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
   },
-  severityNumActive: {
-    color: "#fff",
-  },
-  severityDesc: {
-    color: "#666",
-    fontSize: 9,
-    marginTop: 2,
-  },
-  severityDescActive: {
-    color: "#fff",
-  },
-  actions: {
+  tilesRow: {
     flexDirection: "row",
+    flexWrap: "wrap",
     gap: 10,
   },
-  submitBtn: {
-    flex: 2,
-    backgroundColor: "#71B07B",
-    borderRadius: 10,
-    paddingVertical: 14,
+  tile: {
+    width: TILE_SIZE,
     alignItems: "center",
   },
-  submitBtnDisabled: {
-    opacity: 0.4,
+  tileIconBg: {
+    width: TILE_SIZE,
+    height: TILE_SIZE,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 6,
   },
-  submitText: {
-    color: "#fff",
+  tileEmoji: {
+    fontSize: 30,
+  },
+  tileLabel: {
+    color: "#ddd",
+    fontSize: 11,
+    fontWeight: "600",
+    textAlign: "center",
+  },
+  // Severity step
+  severityStep: {
+    paddingTop: 12,
+    paddingBottom: 8,
+  },
+  severityPrompt: {
+    color: "#aaa",
+    fontSize: 14,
+    fontWeight: "600",
+    marginBottom: 14,
+    textAlign: "center",
+  },
+  severityBtnRow: {
+    flexDirection: "row",
+    gap: 12,
+    justifyContent: "center",
+    marginBottom: 20,
+  },
+  severityChip: {
+    flex: 1,
+    borderWidth: 2,
+    borderRadius: 12,
+    paddingVertical: 18,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  severityChipText: {
     fontSize: 16,
     fontWeight: "700",
   },
-  cancelBtn: {
-    flex: 1,
-    backgroundColor: "#333",
-    borderRadius: 10,
-    paddingVertical: 14,
-    alignItems: "center",
+  backBtn: {
+    alignSelf: "center",
+    paddingVertical: 8,
+    paddingHorizontal: 16,
   },
-  cancelText: {
-    color: "#aaa",
-    fontSize: 16,
-    fontWeight: "600",
+  backBtnText: {
+    color: "#888",
+    fontSize: 14,
   },
 });

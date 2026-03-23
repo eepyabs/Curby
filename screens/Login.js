@@ -43,7 +43,7 @@ export default function Login({ navigation }) {
         try {
             const user = await loginUser(username.trim(), password);
             console.log('Login success:', user.username);
-            navigation.replace('Map', { currentUser: user });
+            navigation.replace('Map', { username: user.username });
         } catch (e) {
             console.error('Login error:', e.message);
             setError(e.message || 'Login failed');

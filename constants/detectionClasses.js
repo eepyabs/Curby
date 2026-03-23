@@ -11,6 +11,10 @@ export const CATEGORIES = {
       "Pothole", "Speed Bump", "Construction", "Traffic Cone", "Oil Stain",
     ],
   },
+  Reports: {
+    color: "#FF6B35",
+    classes: ["Police", "Car Wreck", "Stopped Vehicle", "Roadkill", "Debris", "Traffic"],
+  },
   Infrastructure: {
     color: "#FF8C00",
     classes: [
@@ -59,6 +63,57 @@ for (const [, cat] of Object.entries(CATEGORIES)) {
     CLASS_COLOR_MAP[cls] = cat.color;
   }
 }
+
+// User-reportable hazard categories (Waze-style)
+export const USER_REPORT_CATEGORIES = [
+  {
+    label: "Law Enforcement",
+    color: "#4488FF",
+    types: [
+      { key: "Police", label: "Police", emoji: "🚔", hasSeverity: false, expiryMinutes: 90 },
+    ],
+  },
+  {
+    label: "Hazards",
+    color: "#FF4444",
+    types: [
+      { key: "Car Wreck", label: "Car Wreck", emoji: "🚨", hasSeverity: true, expiryMinutes: 120, severityLabels: ["Minor", "Major"] },
+      { key: "Stopped Vehicle", label: "Stopped Vehicle", emoji: "🛑", hasSeverity: false, expiryMinutes: 45 },
+      { key: "Roadkill", label: "Roadkill", emoji: "⚠", hasSeverity: false, expiryMinutes: 480 },
+      { key: "Debris", label: "Debris", emoji: "⚠", hasSeverity: true, expiryMinutes: 180, severityLabels: ["Small", "Large"] },
+    ],
+  },
+  {
+    label: "Road Conditions",
+    color: "#FF8C00",
+    types: [
+      { key: "Pothole", label: "Pothole", emoji: "⚠", hasSeverity: true, expiryMinutes: 4320, severityLabels: ["Small", "Large"] },
+      { key: "Traffic", label: "Traffic", emoji: "🚦", hasSeverity: true, expiryMinutes: 30, severityLabels: ["Light", "Heavy"] },
+    ],
+  },
+  {
+    label: "Construction",
+    color: "#FFD700",
+    types: [
+      { key: "Construction", label: "Construction", emoji: "🚧", hasSeverity: true, expiryMinutes: 600, severityLabels: ["Single Lane", "Road Closed"] },
+    ],
+  },
+];
+
+// Flat map: type key → emoji (for map symbol rendering)
+export const TYPE_EMOJI = {
+  Police: "🚔",
+  "Car Wreck": "🚨",
+  "Stopped Vehicle": "🛑",
+  Roadkill: "⚠",
+  Debris: "⚠",
+  Pothole: "⚠",
+  Traffic: "🚦",
+  Construction: "🚧",
+  "Speed Bump": "⚠",
+  "Traffic Light": "🚦",
+  "Traffic Cone": "🚧",
+};
 
 // Returns a filter object with every class enabled
 export function defaultClassFilter() {
