@@ -29,6 +29,13 @@
             {
               "client_id": "600976391192-9r4e8icmname3t25t88f17pv5q9q3j06.apps.googleusercontent.com",
               "client_type": 3
+            },
+            {
+              "client_id": "600976391192-vnjaaj6f0jdtjvdg2oh9va0ajj7ujkt5.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "Isaiah-Hinds.CurbyiOS"
+              }
             }
           ]
         }

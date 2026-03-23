@@ -366,40 +366,7 @@ export default function MapScreen({ navigation }) {
         return { type: "FeatureCollection", features: filtered };
     }, [detectionGeoJSON, classFilter]);
 
-     // ── Heatmap helpers ──────────────────────────────────────
-     const hexToRgba = useCallback((hex, alpha = 1) => {
-        const h = String(hex || "").replace("#", "").trim();
-        if (h.length !== 6) return `rgba(0,0,0,${alpha})`;
-        const r = parseInt(h.slice(0, 2), 16);
-        const g = parseInt(h.slice(2, 4), 16);
-        const b = parseInt(h.slice(4, 6), 16);
-        return `rgba(${r},${g},${b},${alpha})`;
-     }, []);
-
-     const heatmapSources = useMemo(() => {
-        if (!filteredGeoJSON?.features?.length) return [];
-
-        const entries = Object.entries(CATEGORIES ?? {});
-
-        return entries
-            .map(([catName,cat]) => {
-                const catClasses = Array.isArray(cat?.classes) ? cat.classes : [];
-                const classesSet = new Set(catClasses);
-
-                const features = filteredGeoJSON.features.filter((f) => {
-                    const classes = f.properties?.classes ?? [];
-                    return classes.some((c) => classesSet.has(c));
-                });
-
-                return {
-                    id: String(catName),
-                    title: String(catName),
-                    color: cat?.color ?? "#ffffff",
-                    geojson: { type: "FeatureCollection", features },
-                };
-            })
-            .filter((x) => x.geojson.features.length > 0);
-     }, [filteredGeoJSON]);
+     // (heatmap rendered directly from filteredGeoJSON — no per-category split)
 
     // ── Detections loading ──────────────────────────────────────
     const initialFitDone = useRef(false);
@@ -870,43 +837,48 @@ export default function MapScreen({ navigation }) {
                         <Mapbox.PointAnnotation id="dest" coordinate={destinationCoords} />
                     )}
 
-                    {/* Heatmaps */}
-                    {heatmapSources.map((src) => (
-                        <Mapbox.ShapeSource
-                            key={`hm-src-${src.id}`}
-                            id={`hm-src-${src.id}`}
-                            shape={src.geojson}
-                        >
+                    {/* Heatmap */}
+                    {filteredGeoJSON && filteredGeoJSON.features.length > 0 && (
+                        <Mapbox.ShapeSource id="heatmap-src" shape={filteredGeoJSON}>
                             <Mapbox.HeatmapLayer
-                                id={`hm-${src.id}`}
+                                id="heatmap"
                                 style={{
                                     heatmapRadius: [
                                         "interpolate", ["linear"], ["zoom"],
-                                        10, 18,
-                                        14, 34,
-                                        18, 52
+                                        6,  8,
+                                        10, 15,
+                                        14, 22,
+                                        18, 30,
                                     ],
+                                    heatmapWeight: 1,
                                     heatmapIntensity: [
                                         "interpolate", ["linear"], ["zoom"],
-                                        10, 0.9,
-                                        14, 1.35,
-                                        18, 1.8,
+                                        6,  0.6,
+                                        10, 0.8,
+                                        14, 1,
+                                        18, 1.2,
                                     ],
-                                    heatmapOpacity: 0.95,
+                                    heatmapOpacity: [
+                                        "interpolate", ["linear"], ["zoom"],
+                                        6,  0.8,
+                                        18, 0.85,
+                                    ],
                                     heatmapColor: [
                                         "interpolate",
                                         ["linear"],
                                         ["heatmap-density"],
-                                        0, hexToRgba(src.color, 0.0),
-                                        0.10, hexToRgba(src.color, 0.40),
-                                        0.30, hexToRgba(src.color, 0.70),
-                                        0.60, hexToRgba(src.color, 0.90),
-                                        1.0, hexToRgba(src.color, 1.0),
+                                        0,    "rgba(0,0,0,0)",
+                                        0.1,  "rgba(0,0,255,0.35)",
+                                        0.3,  "rgba(0,200,255,0.55)",
+                                        0.5,  "rgba(0,255,128,0.7)",
+                                        0.7,  "rgba(255,255,0,0.8)",
+                                        0.85, "rgba(255,128,0,0.9)",
+                                        1.0,  "rgba(255,0,0,1)",
                                     ],
                                 }}
                             />
                         </Mapbox.ShapeSource>
-                    ))}
+                    )}
 
                     {/* Tap targets for detections */}
                     {filteredGeoJSON && filteredGeoJSON.features.length > 0 && (
